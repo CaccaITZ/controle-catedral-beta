@@ -511,6 +511,9 @@
         let videoPreviewErrorPath = '';
         let videoTokenPromptDismissedPath = '';
         let latestMediaPlayerInfo = null;
+        let lastReceivedPreviewSignature = '';
+        let catedralPreviewEndpointWarned = false;
+        let videoPreviewErrorUrl = '';
 
         // Conexão persistente ao OBS WebSocket v5. Não interfere nas chamadas da API do Holyrics.
         let obsWsSocket = null;
@@ -969,8 +972,24 @@
             document.getElementById('atualContainer').classList.toggle('hidden', modoTexto);
         }
 
+        function limparPreviaRecebida() {
+            const video = document.getElementById('videoAtual');
+            restaurarAtualHolyrics();
+            video.onerror = null;
+            video.onloadedmetadata = null;
+            video.oncanplay = null;
+            video.removeAttribute('src');
+            video.load();
+            videoPreviewUrl = '';
+            videoPreviewPath = '';
+            videoPreviewErrorUrl = '';
+            lastReceivedPreviewSignature = '';
+        }
+
         function sincronizarTempoVideo(info) {
             const video = document.getElementById('videoAtual');
+            if (!info) return;
+
             const currentMs = Number(info.time_ms);
             if (video.readyState >= 1 && Number.isFinite(currentMs) && currentMs >= 0) {
                 const wanted = currentMs / 1000;
@@ -978,6 +997,7 @@
                     try { video.currentTime = wanted; } catch (_) {}
                 }
             }
+
             if (info.playing === true) {
                 if (video.paused) video.play().catch(() => {});
             } else if (!video.paused) {
@@ -985,102 +1005,135 @@
             }
         }
 
+        function receberUrlVideoModulo(payload) {
+            if (!payload || payload.available === false) {
+                if (videoPreviewUrl || videoPreviewActive) limparPreviaRecebida();
+                return;
+            }
+
+            const rawUrl = String(payload.url || '').trim();
+            if (!rawUrl) return;
+
+            let url;
+            try {
+                url = new URL(rawUrl);
+            } catch (_) {
+                console.warn('Prévia Catedral: o módulo enviou uma URL inválida.');
+                return;
+            }
+
+            if ((url.protocol !== 'http:' && url.protocol !== 'https:') ||
+                !/\/get_video\/?$/i.test(url.pathname)) {
+                console.warn('Prévia Catedral: a URL recebida não é um endereço /get_video HTTP(S).');
+                return;
+            }
+
+            const signature = rawUrl + '|' + String(payload.updated_at || '');
+            const sameVideo = (signature === lastReceivedPreviewSignature || rawUrl === videoPreviewUrl);
+            if (payload.path) videoPreviewPath = String(payload.path);
+            if (sameVideo) {
+                const existingVideo = document.getElementById('videoAtual');
+                if (modoTexto || existingVideo.getAttribute('src') === rawUrl) return;
+            }
+
+            lastReceivedPreviewSignature = signature;
+            videoPreviewUrl = rawUrl;
+            videoPreviewPath = String(payload.path || payload.name || videoPreviewPath || '');
+            videoPreviewErrorUrl = '';
+
+            if (modoTexto) return;
+
+            const video = document.getElementById('videoAtual');
+            video.pause();
+            video.onerror = () => {
+                if (videoPreviewUrl !== rawUrl) return;
+                videoPreviewErrorUrl = rawUrl;
+                restaurarAtualHolyrics();
+                console.warn('Prévia Catedral: o endereço recebido do módulo não pôde ser reproduzido. Verifique se o tablet alcança o IP/porta do serviço de vídeo do Holyrics.');
+            };
+            video.onloadedmetadata = () => {
+                if (videoPreviewUrl !== rawUrl) return;
+                if (latestMediaPlayerInfo) sincronizarTempoVideo(latestMediaPlayerInfo);
+            };
+            video.oncanplay = () => {
+                if (videoPreviewUrl !== rawUrl) return;
+                mostrarVideoAtual();
+                if (!latestMediaPlayerInfo || latestMediaPlayerInfo.playing === true) {
+                    video.play().catch(() => {});
+                } else {
+                    sincronizarTempoVideo(latestMediaPlayerInfo);
+                }
+            };
+            video.src = rawUrl;
+            video.load();
+            video.play().catch(() => {});
+        }
+
+        function caminhoVideoAtual(info) {
+            let path = String(info.relative_path || info.name || '').trim();
+            path = path.replace(/^video[\\/]/i, '');
+            if (!path && info.path) {
+                const fullPath = String(info.path);
+                const marker = '\\media\\video\\';
+                const index = fullPath.toLowerCase().lastIndexOf(marker);
+                path = index >= 0 ? fullPath.slice(index + marker.length) : fullPath.split(/[\\/]/).pop();
+            }
+            return path.replace(/\\/g, '/');
+        }
+
+        function pareceVideo(info) {
+            const path = String(info.relative_path || info.name || info.path || '');
+            return /\.(mp4|m4v|mov|webm|mkv|avi|mpg|mpeg|3gp)$/i.test(path);
+        }
+
         async function atualizarPreviaVideo() {
             try {
-                const result = await api('GetMediaPlayerInfo');
-                if (!result || result.status !== 'ok' || !result.data) return;
+                // Todos os aparelhos consultam a mesma publicação do módulo no API Server do Holyrics.
+                // Não há IP/porta receptora do aparelho nem serviço auxiliar no PC.
+                const respostas = await Promise.all([
+                    api('GetMediaPlayerInfo'),
+                    api('GetCatedralVideoPreview')
+                ]);
 
-                const info = result.data;
+                const respostaPlayer = respostas[0];
+                const respostaPrevia = respostas[1];
+
+                if (respostaPrevia && respostaPrevia.status === 'ok' && respostaPrevia.data) {
+                    catedralPreviewEndpointWarned = false;
+                    receberUrlVideoModulo(respostaPrevia.data);
+                } else if (!catedralPreviewEndpointWarned) {
+                    catedralPreviewEndpointWarned = true;
+                    console.warn(
+                        'Prévia Catedral: não foi possível consultar GetCatedralVideoPreview. ' +
+                        'Verifique se a ação personalizada foi adicionada ao API Server do Holyrics.',
+                        respostaPrevia
+                    );
+                }
+
+                if (!respostaPlayer || respostaPlayer.status !== 'ok' || !respostaPlayer.data) return;
+
+                const info = respostaPlayer.data;
                 latestMediaPlayerInfo = info;
                 const duration = Number(info.duration_ms);
                 const elapsed = Number(info.time_ms);
-                const mediaPath = caminhoVideoAtual(info);
                 const active = pareceVideo(info) &&
                     (info.playing === true ||
                      (Number.isFinite(duration) && duration > 0 &&
                       Number.isFinite(elapsed) && elapsed >= 0 && elapsed < duration));
 
-                if (!active || !mediaPath) {
-                    if (videoPreviewUrl || videoPreviewActive) {
-                        restaurarAtualHolyrics();
-                        const video = document.getElementById('videoAtual');
-                        video.removeAttribute('src');
-                        video.load();
-                        videoPreviewUrl = '';
-                        videoPreviewPath = '';
-                        videoPreviewErrorPath = '';
-                    }
+                if (!active) {
+                    if (videoPreviewUrl || videoPreviewActive) limparPreviaRecebida();
                     return;
                 }
 
-                if (mediaPath !== videoPreviewPath) {
-                    videoPreviewPath = mediaPath;
-                    videoPreviewErrorPath = '';
-                    videoTokenPromptDismissedPath = '';
-                }
-
-                if (modoTexto) return;
-
-                if (!carregarConfigObsVideo()) {
-                    restaurarAtualHolyrics();
-                    if (videoTokenPromptDismissedPath !== mediaPath) {
-                        abrirDialogoTokenVideo();
-                    }
-                    return;
-                }
-
-                if (videoPreviewErrorPath === mediaPath) return;
-
-                let streamUrl;
-                try {
-                    streamUrl = await obterUrlFonteVideoObs();
-                } catch (error) {
-                    restaurarAtualHolyrics();
-                    videoPreviewErrorPath = mediaPath;
-                    abrirDialogoTokenVideo(
-                        (error && error.message ? error.message : 'Não foi possível consultar a fonte do OBS.') +
-                        ' Confira a configuração do WebSocket e toque em “Testar e salvar”.'
-                    );
-                    return;
-                }
-
-                // A URL do módulo é a fonte confiável e já inclui o token necessário.
-                // Não bloqueie a reprodução por diferenças de caminho entre o nome retornado
-                // pela API do Holyrics e o caminho usado pelo plugin em /get_video.
-                // O módulo atualiza a URL da fonte a cada vídeo elegível.
-                console.log('Prévia Catedral: URL de vídeo recebida do OBS.', {
-                    mediaPath: mediaPath,
-                    streamUrl: streamUrl
-                });
+                if (modoTexto || !videoPreviewUrl || videoPreviewErrorUrl === videoPreviewUrl) return;
 
                 const video = document.getElementById('videoAtual');
-                if (streamUrl !== videoPreviewUrl) {
-                    videoPreviewUrl = streamUrl;
-                    video.pause();
-                    video.onerror = () => {
-                        if (videoPreviewUrl !== streamUrl) return;
-                        videoPreviewErrorPath = mediaPath;
-                        restaurarAtualHolyrics();
-                        abrirDialogoTokenVideo('A URL veio do OBS, mas o tablet não conseguiu reproduzir o fluxo de vídeo. Confira se o IP exibido na URL é acessível pelo tablet.');
-                    };
-                    video.onloadedmetadata = () => {
-                        if (videoPreviewUrl !== streamUrl) return;
-                        sincronizarTempoVideo(latestMediaPlayerInfo || info);
-                    };
-                    video.oncanplay = () => {
-                        if (videoPreviewUrl !== streamUrl) return;
-                        sincronizarTempoVideo(latestMediaPlayerInfo || info);
-                        mostrarVideoAtual();
-                    };
-                    video.src = streamUrl;
-                    video.load();
-                } else {
-                    sincronizarTempoVideo(info);
-                    if (video.readyState >= 2) mostrarVideoAtual();
-                }
+                if (video.readyState >= 1) sincronizarTempoVideo(info);
+                if (video.readyState >= 2) mostrarVideoAtual();
             } catch (error) {
-                // A falha da prévia não interfere na exibição normal do Holyrics.
-                console.warn('Não foi possível consultar a prévia de vídeo:', error);
+                // A falha da prévia não interfere nas demais funções do aplicativo.
+                console.warn('Não foi possível atualizar a sincronização da prévia:', error);
             } finally {
                 setTimeout(atualizarPreviaVideo, 1000);
             }
@@ -1306,40 +1359,14 @@
 
                         if (!conexaoHolyricsConfirmada) {
                             alert('Não consegui confirmar uma resposta válida da API do Holyrics em ' + novoIp +
-                                '. A prévia do OBS será configurada separadamente.');
+                                '. A prévia de vídeo depende da ação GetCatedralVideoPreview no API Server do Holyrics.');
                         }
                     }
                 }
                 aplicarEnderecoHolyricsNasTelas();
             }
 
-            // A configuração do OBS não depende da validação do endpoint de apresentação
-            // do Holyrics. Configurações antigas são reapresentadas uma vez para confirmar
-            // os dados e corrigir versões que os salvaram sem validação completa.
-            const cfgObs = carregarConfigObsVideo();
-            const versaoCfgObs = localStorage.getItem(OBS_VIDEO_CONFIG_VERSION_KEY);
-
-            if (!cfgObs || versaoCfgObs !== OBS_VIDEO_CONFIG_VERSION) {
-                abrirDialogoTokenVideo(
-                    cfgObs
-                        ? 'Confirme e teste a configuração do OBS WebSocket nesta versão para ativar a prévia.'
-                        : 'Configure o OBS WebSocket para ativar a prévia de vídeo. Isso é separado da conexão do Holyrics.',
-                    cfgObs
-                );
-            } else {
-                try {
-                    await validarConexaoObsVideo(cfgObs);
-                } catch (erroObs) {
-                    localStorage.removeItem(OBS_VIDEO_CONFIG_KEY);
-                    localStorage.removeItem(OBS_VIDEO_CONFIG_VERSION_KEY);
-                    limparConexaoObsVideo();
-                    abrirDialogoTokenVideo(
-                        'A configuração anterior do OBS não foi validada. Confira os dados e teste novamente. ' +
-                        (erroObs && erroObs.message ? erroObs.message : ''),
-                        cfgObs
-                    );
-                }
-            }
+            // A prévia consulta a URL publicada pelo módulo do Holyrics; não depende do OBS.
 
             updateData();
             atualizarPreviaVideo();
