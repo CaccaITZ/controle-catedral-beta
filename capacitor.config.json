@@ -1,0 +1,14 @@
+{
+  "appId": "br.com.catedral",
+  "appName": "Controle Catedral",
+  "webDir": "www",
+  "ios": {
+    "contentInset": "always"
+  },
+  "android": {
+    "allowMixedContent": true
+  },
+  "server": {
+    "androidScheme": "http"
+  }
+}
