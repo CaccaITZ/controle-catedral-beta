@@ -1,40 +1,39 @@
 # Integração Holyrics — Prévia de Vídeo Catedral
 
-Esta integração é uma etapa separada do aplicativo. Ela não altera as funções atuais do app nem modifica a fonte do OBS.
+Esta versão da beta usa o próprio Holyrics para distribuir a URL do vídeo. Não usa OBS WebSocket, PowerShell, servidor receptor separado nem IP individual dos celulares/tablets.
 
 ## Arquivos
 
-- `01-modulo-previa-catedral.js`: módulo do Holyrics. Detecta o evento `displaying / any_video` e publica as informações do vídeo em uma variável global compartilhada do Holyrics.
-- `02-api-server-previa-catedral.js`: exemplo de implementação para expor essa informação por uma ação personalizada do API Server.
-- A chave global compartilhada é `@catedral#video_preview`.
-- A ação HTTP será `GetCatedralVideoPreview`.
+- `01-modulo-previa-catedral.js`: detecta o evento `displaying / any_video`, calcula a URL autenticada do serviço HTTP de vídeo do Plugin do Holyrics e publica os dados no estado global `@catedral#video_preview`.
+- `02-api-server-previa-catedral.js`: ação personalizada `GetCatedralVideoPreview`, que entrega o estado publicado pelo módulo aos aplicativos.
+- `www/index.html`: consulta `GetCatedralVideoPreview` e `GetMediaPlayerInfo` pela API do Holyrics, usando o IP configurado no app e a porta API `4455`.
 
-## Como funciona
+## Fluxo
 
-1. O módulo observa cada vídeo exibido, sem aplicar o filtro do módulo OBS para nomes iniciados por `!`.
-2. Obtém a configuração local do servidor de vídeo do Holyrics e calcula o token por arquivo com a mesma sequência do módulo Video Sync OBS+.
-3. Armazena URL, caminho, nome e horário da atualização no estado global do Holyrics.
-4. A ação personalizada do API Server devolve esses dados ao app.
+1. O Holyrics começa a exibir um vídeo.
+2. O módulo publica URL, nome, caminho e horário em `@catedral#video_preview`.
+3. Cada app Controle Catedral consulta a mesma ação da API do Holyrics periodicamente.
+4. O app reproduz a URL autenticada e sincroniza o vídeo com o estado/tempo retornado por `GetMediaPlayerInfo`.
 
-## Importante antes do teste
+Os dispositivos não precisam ter IP fixo e o módulo não precisa conhecer os endereços dos apps. Não é necessário iniciar um servidor manualmente a cada utilização.
 
-- O arquivo usa o evento de módulo `displaying / any_video` e requer Holyrics 2.24 ou superior.
-- A configuração local de vídeo deve conter `ip`, `port` e `token`, como no Video Sync OBS+.
-- O IP configurado precisa ser alcançável pelo tablet. A URL é gerada com o IP da configuração, nunca com `localhost`.
-- A função `request` do segundo arquivo é um exemplo completo. Se o API Server já tiver uma implementação personalizada, preserve-a e integre somente o caso `GetCatedralVideoPreview`; não sobrescreva as ações existentes.
-- Esta primeira versão é para validação no computador. Só depois de comprovar no Holyrics que a ação retorna a URL correta, integraremos o app para consumir a ação, alterando exclusivamente a prévia do campo **Atual**.
-- O aplicativo deverá continuar confirmando pelo `GetMediaPlayerInfo` se o vídeo está ativo e usando as informações de tempo do player para manter a sincronização.
+## Configuração no Holyrics
 
-## Teste esperado
+1. Instale e habilite `01-modulo-previa-catedral.js` no Holyrics (requer a versão indicada no módulo).
+2. Integre o caso `GetCatedralVideoPreview` de `02-api-server-previa-catedral.js` ao JavaScript personalizado do API Server. **Não substitua a função `request` inteira se ela já contiver outros casos**; incorpore somente o `case` e preserve as demais ações.
+3. Confirme que o API Server está acessível pelo endereço e porta configurados no app.
+4. Confirme que o endereço incluído na URL `/get_video` é acessível pelos aparelhos na mesma rede e que o serviço HTTP de vídeo do Plugin do Holyrics está ativo.
 
-Depois de instalar e ativar o módulo e integrar a ação personalizada, iniciar um vídeo deve fazer a ação `GetCatedralVideoPreview` retornar um objeto semelhante a:
+A ação personalizada usa o mesmo API Server que atende às outras chamadas do aplicativo. Não exige uma porta receptora separada nem um serviço PowerShell.
+
+## Resposta esperada
 
 ```json
 {
   "status": "ok",
   "data": {
     "available": true,
-    "url": "http://IP:PORTA/get_video?path=...&token=...",
+    "url": "http://IP_DO_HOLYRICS:PORTA/get_video?path=...&token=...",
     "path": "...",
     "name": "...",
     "updated_at": 0
@@ -42,4 +41,8 @@ Depois de instalar e ativar o módulo e integrar a ação personalizada, iniciar
 }
 ```
 
-O endereço e o token acima são exemplos de formato; o valor real é calculado pelo módulo durante a execução.
+Os valores são ilustrativos. O módulo gera a URL e o token durante a execução.
+
+## Limites do teste
+
+O código foi integrado à branch beta, mas ainda precisa ser validado no Holyrics real com a ação personalizada instalada. A build estável v6 e o repositório `CaccaITZ/controle-catedral-ios` não devem ser alterados durante esses testes.
