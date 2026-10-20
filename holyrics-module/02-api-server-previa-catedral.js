@@ -1,13 +1,13 @@
 /*
- * Integração API Server — Prévia de Vídeo Catedral
+ * Ação personalizada do API Server — Prévia de Vídeo Catedral
  *
- * Adicione este caso à implementação JavaScript personalizada do API Server
- * do Holyrics. Se já existir uma função request(action, headers, content, info),
- * NÃO substitua a função inteira: copie apenas o bloco case e mantenha todos
- * os casos existentes e o return true final.
+ * Integre este case à função request(action, headers, content, info)
+ * do JavaScript personalizado do API Server do Holyrics.
+ * NÃO substitua uma função request já existente por inteiro: preserve
+ * os outros cases e o return true final.
  *
- * Endpoint esperado pelo aplicativo:
- * POST http://IP:PORTA/api/GetCatedralVideoPreview?token=TOKEN
+ * Ação consultada pelo app:
+ * POST http://IP_DO_HOLYRICS:4455/api/GetCatedralVideoPreview?token=TOKEN
  * Content-Type: application/json
  * Body: {}
  */
@@ -19,7 +19,7 @@ function request(action, headers, content, info) {
       if (preview == null) {
         preview = {
           available: false,
-          message: "Módulo Prévia de Vídeo — Catedral ainda não publicou um vídeo."
+          message: "O módulo Prévia de Vídeo — Catedral ainda não publicou um vídeo."
         };
       }
       return {
@@ -28,6 +28,6 @@ function request(action, headers, content, info) {
       };
   }
 
-  // Mantém o processamento padrão para todas as outras ações da API.
+  // Não bloqueia as ações padrão nem os demais endpoints personalizados.
   return true;
 }
