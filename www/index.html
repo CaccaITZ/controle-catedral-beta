@@ -731,6 +731,10 @@
                 };
                 video.oncanplay = () => {
                     if (videoPreviewUrl !== streamUrl) return;
+                    if (holyricsTemApresentacaoAtiva()) {
+                        restaurarAtualHolyrics();
+                        return;
+                    }
                     sincronizarTempoVideo(latestMediaPlayerInfo || payload);
                     mostrarVideoAtual();
                     if (!latestMediaPlayerInfo || latestMediaPlayerInfo.playing === true) {
