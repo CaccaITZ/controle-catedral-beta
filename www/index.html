@@ -670,7 +670,7 @@
         function arquivoPareceVideo(media) {
             const nome = String((media && (media.path || media.name)) || '')
                 .split(/[?#]/)[0].toLowerCase();
-            return /\\.(mp4|m4v|mov|webm|mkv|avi|mpeg|mpg|wmv|flv|3gp|ogv)$/i.test(nome);
+            return /\.(mp4|m4v|mov|webm|mkv|avi|mpeg|mpg|wmv|flv|3gp|ogv)$/i.test(nome);
         }
 
         async function pararVideoHolyricsSeNecessario() {
@@ -822,6 +822,9 @@
             videoPreviewErrorUrl = '';
             lastReceivedPreviewSignature = '';
             latestMediaPlayerInfo = null;
+            // A ausência do vídeo encerra a reprodução anterior; se o mesmo arquivo
+            // voltar a tocar, isso será reconhecido como uma nova solicitação.
+            ultimoPlayingVideo = false;
         }
 
         function sincronizarTempoVideo(info) {
