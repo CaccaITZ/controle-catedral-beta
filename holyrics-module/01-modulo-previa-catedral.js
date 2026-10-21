@@ -7,10 +7,13 @@
  */
 
 var CATEDRAL_VIDEO_PREVIEW_KEY = "@catedral#video_preview";
+var CATEDRAL_VIDEO_PREVIEW_MODULE = null;
 
 function catedralLog(message) {
   try {
-    h.log("[Prévia Catedral] " + String(message));
+    if (CATEDRAL_VIDEO_PREVIEW_MODULE && typeof CATEDRAL_VIDEO_PREVIEW_MODULE.log === "function") {
+      CATEDRAL_VIDEO_PREVIEW_MODULE.log("[Prévia Catedral] " + String(message));
+    }
   } catch (e) {}
 }
 
@@ -60,7 +63,7 @@ function readPluginVideoSettings() {
 }
 
 function publishCatedralVideoPreview(obj, module) {
-  catedralLog("Evento de vídeo recebido. Campos do evento: " + (obj ? Object.keys(obj).join(", ") : "(objeto vazio)"));
+  catedralLog("Evento de vídeo recebido; verificando file_fullname.");
   var fullPath = String(obj && obj.file_fullname || "").trim();
   if (!fullPath) {
     catedralLog("O evento não trouxe file_fullname; não é possível construir a URL.");
@@ -117,6 +120,7 @@ function publishCatedralVideoPreview(obj, module) {
 }
 
 function startup(module) {
+  CATEDRAL_VIDEO_PREVIEW_MODULE = module;
   catedralLog("Módulo iniciado. Host configurado no módulo: " +
     String(module && module.settings && module.settings.video_url_host || "(vazio; usa configuração do plugin)"));
   h.setGlobal(CATEDRAL_VIDEO_PREVIEW_KEY, {
