@@ -2,8 +2,8 @@
  * Prévia de vídeo — Catedral
  * Holyrics 2.24+
  *
- * Detecta vídeos exibidos e publica a URL no estado global para o app.
- * A reprodução usa o serviço HTTP de vídeo do Plugin do Holyrics; não usa OBS.
+ * Detecta vídeos exibidos, publica a URL no estado global e envia a URL
+ * ao servidor PowerShell local em /api/video-preview. Não usa OBS.
  */
 
 var CATEDRAL_VIDEO_PREVIEW_KEY = "@catedral#video_preview";
@@ -30,10 +30,23 @@ function settings() {
     { type: "title", label: "Endereço para reprodução da prévia" },
     {
       id: "video_url_host",
-      name: "IP/host do servidor de vídeo",
-      description: "Use um endereço acessível pelo aparelho que exibirá a prévia. Deixe vazio para usar o IP da configuração do serviço de vídeo.",
+      name: "IP/host do servidor de vídeo do Holyrics",
+      description: "Endereço que os dispositivos usarão para acessar o vídeo. Deixe vazio para usar o IP configurado no Plugin do Holyrics.",
       type: "string",
       default_value: ""
+    },
+    {
+      id: "preview_server_host",
+      name: "IP do servidor PowerShell de prévia",
+      description: "No próprio PC do Holyrics, use 127.0.0.1. Para outro servidor, informe seu IP acessível pela rede.",
+      type: "string",
+      default_value: "127.0.0.1"
+    },
+    {
+      id: "preview_server_port",
+      name: "Porta do servidor PowerShell de prévia",
+      type: "string",
+      default_value: "8766"
     }
   ];
 }
@@ -57,6 +70,31 @@ function readPluginVideoSettings() {
   }
   catedralLog("Nenhuma configuração do serviço de vídeo foi encontrada.");
   return null;
+}
+
+function sendPreviewToPowerShell(module, payload) {
+  var serverHost = String(module && module.settings && module.settings.preview_server_host || "127.0.0.1").trim();
+  var serverPort = String(module && module.settings && module.settings.preview_server_port || "8766").trim();
+  if (!serverHost || !/^\\d{1,5}$/.test(serverPort)) {
+    catedralLog("Envio ao PowerShell ignorado: IP ou porta inválidos.");
+    return;
+  }
+
+  var endpoint = "http://" + serverHost + ":" + serverPort + "/api/video-preview";
+  var options = {
+    type: "POST",
+    headers: { "Content-Type": "application/json" },
+    data: JSON.stringify(payload),
+    timeout: 3000,
+    response_data_type: "string;utf-8"
+  };
+
+  try {
+    var response = h.httpRequest(endpoint, options);
+    catedralLog("PowerShell recebeu a URL em " + endpoint + "; resposta=" + String(response));
+  } catch (e) {
+    catedralLog("Falha ao enviar URL ao PowerShell em " + endpoint + ": " + String(e && e.message || e));
+  }
 }
 
 function publishCatedralVideoPreview(obj, module) {
@@ -98,14 +136,16 @@ function publishCatedralVideoPreview(obj, module) {
     var normalized = fullPath.replace(/\\/g, "/");
 
     catedralLog("URL construída: host=" + host + "; port=" + port + "; rota=/get_video. Token omitido.");
-    h.setGlobal(CATEDRAL_VIDEO_PREVIEW_KEY, {
+    var previewPayload = {
       available: true,
       url: url,
       path: videoPath,
       name: normalized.substring(normalized.lastIndexOf("/") + 1),
       updated_at: new Date().getTime()
-    });
+    };
+    h.setGlobal(CATEDRAL_VIDEO_PREVIEW_KEY, previewPayload);
     catedralLog("URL publicada no global " + CATEDRAL_VIDEO_PREVIEW_KEY + ".");
+    sendPreviewToPowerShell(module, previewPayload);
   } catch (e) {
     catedralLog("Erro ao construir/publicar URL: " + String(e && e.message || e));
     h.setGlobal(CATEDRAL_VIDEO_PREVIEW_KEY, {
