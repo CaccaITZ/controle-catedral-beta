@@ -694,15 +694,52 @@
             }
         }
 
-        async function reapresentarSlideAtual(presentation) {
-            const slideNumber = Number(presentation && presentation.slide_number);
-            if (!Number.isFinite(slideNumber) || slideNumber < 1) return;
+        const aguardar = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+        async function obterApresentacaoAtual() {
             try {
-                // Ao parar o VLC, algumas telas mantêm o último quadro até o slide
-                // ser reativado. Reaplicar o índice atual evita exigir novo toque no slide.
+                const result = await api('GetCurrentPresentation');
+                if (result && result.status === 'ok') return result.data || null;
+            } catch (error) {
+                console.warn('Prévia Catedral: falha ao consultar apresentação após parar o vídeo:', error);
+            }
+            return null;
+        }
+
+        async function reapresentarSlideAtual(presentation) {
+            try {
+                // A API pode informar a troca de conteúdo antes que o Holyrics termine
+                // a transição do VLC. Depois de parar, espera e consulta de novo para
+                // não reaplicar o índice de um slide anterior.
+                await aguardar(500);
+                let atual = await obterApresentacaoAtual();
+                if (atual) {
+                    latestCurrentPresentation = atual;
+                    ultimaAssinaturaApresentacao = assinaturaApresentacao(atual);
+                } else {
+                    atual = presentation || latestCurrentPresentation;
+                }
+
+                if (!atual) {
+                    limparSlideProximo();
+                    recarregarTelaRetorno();
+                    return;
+                }
+
+                const slideNumber = Number(atual.slide_number);
+                if (!Number.isFinite(slideNumber) || slideNumber < 1) {
+                    recarregarTelaRetorno();
+                    return;
+                }
+
+                // Reaplica o slide já selecionado após o stop. Essa ação é necessária
+                // porque o Holyrics pode deixar o último frame do vídeo no retorno.
                 await api('ActionGoToIndex', { index: slideNumber - 1 });
+                await aguardar(350);
+                recarregarTelaRetorno();
             } catch (error) {
                 console.warn('Prévia Catedral: não foi possível reativar o slide atual:', error);
+                recarregarTelaRetorno();
             }
         }
 
@@ -750,8 +787,8 @@
                 if (assinatura) await reapresentarSlideAtual(latestCurrentPresentation);
             }
 
-            // Recarrega após parar o VLC/reativar o slide, removendo quadro e faixa antigos.
-            recarregarTelaRetorno();
+            // A reativação do slide cuida de atualizar a tela após a transição do VLC.
+            if (!videoAnteriorAtivo) recarregarTelaRetorno();
         }
 
         function registrarSolicitacaoDeVideo(payload, streamUrl) {
