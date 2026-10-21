@@ -402,7 +402,7 @@
 
     <div class="viewer">
         <div class="current">
-            <img id="videoAtual" class="hidden" alt="Prévia do vídeo exibido no Holyrics">
+            <video id="videoAtual" class="hidden" playsinline muted preload="auto"></video>
             <iframe id="atualContainer" src="about:blank"></iframe>
             <iframe id="textoContainer" class="hidden" src="about:blank"></iframe>
         </div>
@@ -570,6 +570,9 @@
             document.getElementById('nextSlide').classList.toggle('hidden', modoTexto);
             document.getElementById('textoProximo').classList.toggle('hidden', !modoTexto);
             document.getElementById('btnToggle').style.background = modoTexto ? '#0a0' : '#c00';
+            if (!modoTexto && videoPreviewActive && videoPreviewUrl && videoPreviewErrorUrl !== videoPreviewUrl) {
+                mostrarVideoAtual();
+            }
         }
 
         /* ── PAINEL PRÓXIMO (só no modo texto) ── */
@@ -601,12 +604,25 @@
             } catch(e) { console.error(e); }
         }
 
-        /* ── PRÉVIA DE VÍDEO DO HOLYRICS POR QUADROS ── */
-        let previewFrameId = '';
-        let previewFrameData = '';
-        let lastPlayerCheck = 0;
-        let playerCheckInFlight = false;
-        let holyricsVideoActive = false;
+        /* ── PRÉVIA DE VÍDEO PELA URL PUBLICADA NA API ── */
+        const VIDEO_PREVIEW_POLL_MS = 750;
+        let videoPreviewRequestInFlight = false;
+
+        function normalizarUrlVideo(rawUrl) {
+            const url = new URL(String(rawUrl || '').trim());
+            if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+                throw new Error('A API retornou uma URL que não é HTTP/HTTPS.');
+            }
+            if (['localhost', '127.0.0.1', '::1'].includes(url.hostname.toLowerCase())) {
+                url.hostname = getHolyricsIp();
+            }
+            let path = url.pathname.toLowerCase();
+            while (path.endsWith('/')) path = path.slice(0, -1);
+            if (!path.endsWith('/get_video')) {
+                throw new Error('A URL recebida não aponta para /get_video.');
+            }
+            return url.toString();
+        }
 
         function mostrarVideoAtual() {
             if (modoTexto) return;
@@ -617,91 +633,119 @@
 
         function restaurarAtualHolyrics() {
             videoPreviewActive = false;
-            const image = document.getElementById('videoAtual');
-            image.classList.add('hidden');
-            image.removeAttribute('src');
+            const video = document.getElementById('videoAtual');
+            video.classList.add('hidden');
+            video.pause();
             document.getElementById('atualContainer').classList.toggle('hidden', modoTexto);
         }
 
         function limparPreviaRecebida() {
             restaurarAtualHolyrics();
+            const video = document.getElementById('videoAtual');
+            video.onerror = null;
+            video.onloadedmetadata = null;
+            video.oncanplay = null;
+            video.removeAttribute('src');
+            video.load();
             videoPreviewUrl = '';
             videoPreviewPath = '';
             videoPreviewErrorUrl = '';
             lastReceivedPreviewSignature = '';
-            previewFrameId = '';
-            previewFrameData = '';
-            holyricsVideoActive = false;
+            latestMediaPlayerInfo = null;
         }
 
-        async function obterQuadroPreviaHolyrics() {
-            const endpoint = 'http://' + getHolyricsIp() + '/stage-view/widescreen.jpg';
-            const params = new URLSearchParams({ json: '1', _: String(Date.now()) });
-            if (previewFrameId) params.set('id', previewFrameId);
-
-            const response = await fetch(endpoint + '?' + params.toString(), {
-                cache: 'no-store',
-                credentials: 'same-origin'
-            });
-            if (!response.ok) throw new Error('Holyrics respondeu HTTP ' + response.status);
-
-            const result = await response.json();
-            if (result && result.id !== undefined && result.id !== null) {
-                previewFrameId = String(result.id);
-            }
-            const frame = String(result && (result.img64 || result.preview || result.img || '') || '');
-            if (frame) {
-                const normalized = frame.startsWith('data:image/')
-                    ? frame
-                    : 'data:image/jpeg;base64,' + frame;
-                if (normalized !== previewFrameData) {
-                    previewFrameData = normalized;
-                    const image = document.getElementById('videoAtual');
-                    image.src = normalized;
-                    mostrarVideoAtual();
+        function sincronizarTempoVideo(info) {
+            const video = document.getElementById('videoAtual');
+            const currentMs = Number(info && info.time_ms);
+            if (video.readyState >= 1 && Number.isFinite(currentMs) && currentMs >= 0) {
+                const wanted = currentMs / 1000;
+                if (Math.abs(video.currentTime - wanted) > 1.25) {
+                    try { video.currentTime = wanted; } catch (_) {}
                 }
             }
-            const delay = Number(result && result.delay);
-            return Number.isFinite(delay) ? Math.max(100, Math.min(1000, delay)) : 250;
+
+            if (info && info.playing === true) {
+                if (video.paused) video.play().catch(() => {});
+            } else if (!video.paused) {
+                video.pause();
+            }
+        }
+
+        function receberUrlVideoApi(payload) {
+            if (!payload || payload.available !== true || !payload.url) {
+                if (videoPreviewUrl || videoPreviewActive) limparPreviaRecebida();
+                return;
+            }
+
+            let streamUrl;
+            try {
+                streamUrl = normalizarUrlVideo(payload.url);
+            } catch (error) {
+                console.warn('Prévia Catedral: URL recebida inválida:', error);
+                return;
+            }
+
+            latestMediaPlayerInfo = payload;
+            videoPreviewPath = String(payload.path || payload.name || videoPreviewPath || '');
+            const video = document.getElementById('videoAtual');
+
+            if (videoPreviewErrorUrl === streamUrl) return;
+
+            if (streamUrl !== videoPreviewUrl) {
+                videoPreviewUrl = streamUrl;
+                videoPreviewErrorUrl = '';
+                video.pause();
+                video.muted = true;
+                video.playsInline = true;
+
+                video.onerror = () => {
+                    if (videoPreviewUrl !== streamUrl) return;
+                    videoPreviewErrorUrl = streamUrl;
+                    restaurarAtualHolyrics();
+                    console.warn('Prévia Catedral: a URL foi recebida, mas o dispositivo não conseguiu reproduzir o vídeo. Verifique se o IP e a porta do serviço de vídeo são acessíveis neste aparelho.');
+                };
+                video.onloadedmetadata = () => {
+                    if (videoPreviewUrl === streamUrl && latestMediaPlayerInfo) {
+                        sincronizarTempoVideo(latestMediaPlayerInfo);
+                    }
+                };
+                video.oncanplay = () => {
+                    if (videoPreviewUrl !== streamUrl) return;
+                    sincronizarTempoVideo(latestMediaPlayerInfo || payload);
+                    mostrarVideoAtual();
+                    if (!latestMediaPlayerInfo || latestMediaPlayerInfo.playing === true) {
+                        video.play().catch(error => {
+                            console.warn('Prévia Catedral: reprodução automática bloqueada pelo dispositivo:', error);
+                        });
+                    }
+                };
+
+                video.src = streamUrl;
+                video.load();
+            }
+
+            if (video.readyState >= 1) sincronizarTempoVideo(payload);
+            if (video.readyState >= 2) mostrarVideoAtual();
         }
 
         async function atualizarPreviaVideo() {
-            let nextDelay = 250;
-            try {
-                const now = Date.now();
-                if (!playerCheckInFlight && now - lastPlayerCheck >= 1000) {
-                    playerCheckInFlight = true;
-                    lastPlayerCheck = now;
-                    try {
-                        const response = await api('GetMediaPlayerInfo');
-                        if (response && response.status === 'ok' && response.data) {
-                            latestMediaPlayerInfo = response.data;
-                            const info = response.data;
-                            const duration = Number(info.duration_ms);
-                            const elapsed = Number(info.time_ms);
-                            const active = pareceVideo(info) &&
-                                (info.playing === true ||
-                                 (Number.isFinite(duration) && duration > 0 &&
-                                  Number.isFinite(elapsed) && elapsed >= 0 && elapsed < duration));
-                            holyricsVideoActive = active;
-                            if (!active) {
-                                if (videoPreviewActive) limparPreviaRecebida();
-                                return;
-                            }
-                            videoPreviewPath = caminhoVideoAtual(info);
-                        }
-                    } finally {
-                        playerCheckInFlight = false;
-                    }
-                }
+            if (videoPreviewRequestInFlight) {
+                setTimeout(atualizarPreviaVideo, VIDEO_PREVIEW_POLL_MS);
+                return;
+            }
 
-                if (holyricsVideoActive) {
-                    nextDelay = await obterQuadroPreviaHolyrics();
+            videoPreviewRequestInFlight = true;
+            try {
+                const response = await api('GetCatedralVideoPreview');
+                if (!response || response.status !== 'ok' || !response.data) {
+                    throw new Error('A API não retornou dados válidos de GetCatedralVideoPreview.');
                 }
+                receberUrlVideoApi(response.data);
             } catch (error) {
-                console.warn('Prévia Catedral: falha ao obter quadro do Holyrics:', error);
+                console.warn('Prévia Catedral: falha ao consultar GetCatedralVideoPreview:', error);
             } finally {
-                setTimeout(atualizarPreviaVideo, nextDelay);
+                videoPreviewRequestInFlight = false;
+                setTimeout(atualizarPreviaVideo, VIDEO_PREVIEW_POLL_MS);
             }
         }
 
