@@ -7,13 +7,10 @@
  */
 
 var CATEDRAL_VIDEO_PREVIEW_KEY = "@catedral#video_preview";
-var CATEDRAL_VIDEO_PREVIEW_MODULE = null;
 
 function catedralLog(message) {
   try {
-    if (CATEDRAL_VIDEO_PREVIEW_MODULE && typeof CATEDRAL_VIDEO_PREVIEW_MODULE.log === "function") {
-      CATEDRAL_VIDEO_PREVIEW_MODULE.log("[Prévia Catedral] " + String(message));
-    }
+    h.log("[Prévia Catedral] " + String(message));
   } catch (e) {}
 }
 
@@ -121,7 +118,6 @@ function publishCatedralVideoPreview(obj, module) {
 }
 
 function startup(module) {
-  CATEDRAL_VIDEO_PREVIEW_MODULE = module;
   catedralLog("Módulo iniciado. Host configurado no módulo: " +
     String(module && module.settings && module.settings.video_url_host || "(vazio; usa configuração do plugin)"));
   h.setGlobal(CATEDRAL_VIDEO_PREVIEW_KEY, {
