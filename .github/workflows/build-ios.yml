@@ -3,7 +3,7 @@ name: Build iOS IPA
 on:
   # Roda quando você der push na main
   push:
-    branches: [main, teste-url-video-api-20261021]
+    branches: [main]
   # Permite rodar manualmente pela aba Actions do GitHub
   workflow_dispatch:
 
