@@ -2,7 +2,7 @@ name: Build Android APK
 
 on:
   push:
-    branches: [main, teste-url-video-api-20261021]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
