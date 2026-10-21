@@ -62,72 +62,6 @@
         }
         body.modo-texto-ativo #videoAtual { display: none !important; }
 
-        .video-token-overlay {
-            position: fixed;
-            inset: 0;
-            z-index: 2500;
-            display: flex;
-            align-items: flex-start;
-            justify-content: center;
-            padding: 8px;
-            overflow-y: auto;
-            overscroll-behavior: contain;
-            background: rgba(0,0,0,.82);
-        }
-        .video-token-card {
-            width: min(520px, 100%);
-            max-height: calc(100vh - 16px);
-            max-height: calc(100dvh - 16px);
-            overflow-y: auto;
-            overscroll-behavior: contain;
-            margin: auto 0;
-            padding: 14px 18px;
-            background: #171717;
-            color: #fff;
-            border: 1px solid #444;
-            border-radius: 12px;
-            box-shadow: 0 12px 40px rgba(0,0,0,.55);
-        }
-        .video-token-card h3 { margin: 0 0 6px; font-size: 18px; }
-        .video-token-card p { font-size: 12px; line-height: 1.35; color: #ddd; margin: 5px 0 8px; }
-        .video-token-card label { display: block; font-size: 12px; }
-        .video-token-card input {
-            display: block;
-            width: 100%;
-            padding: 7px 10px;
-            margin: 4px 0 8px;
-            background: #050505;
-            color: #fff;
-            border: 1px solid #555;
-            border-radius: 6px;
-            font-size: 16px;
-            min-height: 36px;
-        }
-        .video-token-actions { display: flex; gap: 10px; margin-top: 6px; }
-        .video-token-actions button {
-            flex: 1;
-            padding: 9px;
-            border: 0;
-            border-radius: 6px;
-            color: #fff;
-            background: #1565c0;
-            font-size: 14px;
-        }
-        .video-token-actions button.secondary { background: #444; }
-        #videoTokenFeedback { display: block; min-height: 18px; color: #ffcc80; font-size: 12px; margin-top: 8px; }
-        @media (orientation: landscape) and (max-height: 520px) {
-            .video-token-overlay { padding: 4px; }
-            .video-token-card {
-                width: min(760px, 100%);
-                max-height: calc(100vh - 8px);
-                max-height: calc(100dvh - 8px);
-                padding: 9px 14px;
-            }
-            .video-token-card h3 { font-size: 16px; margin-bottom: 4px; }
-            .video-token-card p { font-size: 11px; line-height: 1.25; margin: 3px 0 5px; }
-            .video-token-card input { padding: 5px 8px; min-height: 30px; margin: 3px 0 5px; }
-            .video-token-actions button { padding: 7px; }
-        }
         img { max-width: 100%; max-height: 100%; object-fit: contain; }
         .next-title {
             padding: 5px;
@@ -413,27 +347,6 @@
         </div>
     </div>
 
-    <!-- Configuração da conexão OBS WebSocket usada exclusivamente pela prévia do campo Atual. -->
-    <div id="videoTokenOverlay" class="video-token-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="videoTokenTitle">
-        <div class="video-token-card">
-            <h3 id="videoTokenTitle">Conectar à fonte de vídeo do OBS</h3>
-            <p id="videoTokenExplanation">O aplicativo vai ler automaticamente a URL atual da fonte no OBS. Informe o endereço, a porta e a senha do OBS WebSocket (não é o token da API do Holyrics). Os dados ficam salvos somente neste aparelho.</p>
-            <label for="obsWsHostInput">IP ou host do computador com OBS</label>
-            <input id="obsWsHostInput" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="192.168.10.x">
-            <label for="obsWsPortInput">Porta do OBS WebSocket</label>
-            <input id="obsWsPortInput" type="number" inputmode="numeric" min="1" max="65535" placeholder="Porta configurada no OBS">
-            <label for="obsWsPasswordInput">Senha do OBS WebSocket</label>
-            <input id="obsWsPasswordInput" type="password" autocomplete="new-password" placeholder="Senha configurada no OBS">
-            <label for="obsWsInputName">Nome da fonte no OBS</label>
-            <input id="obsWsInputName" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" value="VIDEO HOLYRICS">
-            <div class="video-token-actions">
-                <button id="btnSalvarVideoToken" type="button">Testar e salvar</button>
-                <button id="btnCancelarVideoToken" class="secondary" type="button">Depois</button>
-            </div>
-            <small id="videoTokenFeedback"></small>
-        </div>
-    </div>
-
     <!-- Botões de navegação -->
     <button class="nav-btn" id="btnPrev" onclick="sendCmd('ActionPrevious')">◀</button>
     <button class="nav-btn" id="btnNext" onclick="sendCmd('ActionNext')">▶</button>
@@ -503,22 +416,14 @@
         let modoTexto    = false;
         let gavetaAberta = false;
         let abaAtual     = 'letras';
-        let proximoVisivel = true;
         let lastSlideNumber = null;
 
         // Estado isolado da prévia de vídeo no campo Atual.
-        const OBS_VIDEO_CONFIG_KEY = 'catedralObsVideoConnection';
-        const OBS_VIDEO_CONFIG_VERSION_KEY = 'catedralObsVideoConfigVersion';
-        const OBS_VIDEO_CONFIG_VERSION = '2';
         let videoPreviewUrl = '';
-        let videoPreviewPath = '';
         let videoPreviewActive = false;
-        let videoPreviewErrorPath = '';
-        let videoTokenPromptDismissedPath = '';
         let latestMediaPlayerInfo = null;
         // undefined = ainda não consultado; null = nenhuma apresentação ativa; objeto = PPT/letra/imagem/texto etc.
         let latestCurrentPresentation;
-        let lastReceivedPreviewSignature = '';
         // Fonte que representa a solicitação mais recente do Holyrics:
         // "video" = vídeo direto; "holyrics" = letra, imagem, PPT, texto ou tela do Holyrics.
         let fonteAtualSolicitada = '';
@@ -528,16 +433,8 @@
         let ultimoTempoVideoMs = null;
         let videoRequestJustDetectedThisPoll = false;
         let mediaStopInFlight = false;
-        let catedralPreviewEndpointWarned = false;
         let videoPreviewErrorUrl = '';
 
-        // Conexão persistente ao OBS WebSocket v5. Não interfere nas chamadas da API do Holyrics.
-        let obsWsSocket = null;
-        let obsWsConnectPromise = null;
-        let obsWsIdentified = false;
-        let obsWsResolvedInputName = '';
-        let obsWsNextRequestId = 1;
-        const obsWsPendingRequests = new Map();
 
         /* ── WAKE LOCK (mantém tela ligada) ── */
         let wakeLock = null;
@@ -584,18 +481,6 @@
             if (!modoTexto && videoPreviewActive && videoPreviewUrl && videoPreviewErrorUrl !== videoPreviewUrl) {
                 mostrarVideoAtual();
             }
-        }
-
-        /* ── PAINEL PRÓXIMO (só no modo texto) ── */
-        function toggleProximo() {
-            mostrarProximo(!proximoVisivel);
-        }
-        function mostrarProximo(visivel) {
-            proximoVisivel = visivel;
-            document.getElementById('nextPanel').classList.toggle('hidden', !visivel);
-            const btn = document.getElementById('btnProximo');
-            btn.classList.toggle('oculto', !visivel);
-            btn.innerHTML = (visivel ? '🙈' : '👁️') + '<span class="label">Próximo</span>';
         }
 
         /* ── API ── */
@@ -860,9 +745,7 @@
             video.removeAttribute('src');
             video.load();
             videoPreviewUrl = '';
-            videoPreviewPath = '';
             videoPreviewErrorUrl = '';
-            lastReceivedPreviewSignature = '';
             latestMediaPlayerInfo = null;
             // A ausência do vídeo encerra a reprodução anterior; se o mesmo arquivo
             // voltar a tocar, isso será reconhecido como uma nova solicitação.
@@ -901,7 +784,6 @@
             }
 
             latestMediaPlayerInfo = payload;
-            videoPreviewPath = String(payload.path || payload.name || videoPreviewPath || '');
             const video = document.getElementById('videoAtual');
 
             // Registra se este vídeo representa uma nova solicitação.
@@ -1224,7 +1106,6 @@
                     } else {
                         localStorage.setItem(HOLYRICS_IP_KEY, novoIp);
                         aplicarEnderecoHolyricsNasTelas();
-                        limparConexaoObsVideo();
                         conexaoHolyricsConfirmada = await testarConexaoHolyrics();
 
                         if (!conexaoHolyricsConfirmada) {
@@ -1236,7 +1117,7 @@
                 aplicarEnderecoHolyricsNasTelas();
             }
 
-            // A prévia usa os quadros fornecidos diretamente pelo Holyrics.
+            // A prévia de vídeo consulta a API e reproduz a URL publicada pelo API Server.
             updateData();
             atualizarPreviaVideo();
         }
