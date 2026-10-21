@@ -91,19 +91,20 @@ function publishCatedralVideoPreview(obj, module) {
     var host = String(module && module.settings && module.settings.video_url_host || videoSettings.ip || "").trim();
     if (!host) throw new Error("O host do servidor de vídeo não está configurado.");
 
-    catedralLog("Construindo URL para o arquivo: " + fullPath);
-    var token = h.sha256(fullPath + "#" + videoSettings.token);
+    catedralLog("Construindo URL; file_fullname=" + fullPath + "; caminho enviado ao serviço=" + videoPath);
+    var videoPath = String(obj && obj.file_relative_path || fullPath).replace(/\\/g, "/");
+    var token = h.sha256(videoPath + "#" + videoSettings.token);
     token = h.base64Encode(token).replace(/[^a-zA-Z0-9]/g, "").substring(0, 20);
     var port = String(videoSettings.port);
     var url = "http://" + host + (port === "80" ? "" : ":" + port) +
-      "/get_video?path=" + encodeURIComponent(fullPath) + "&token=" + token;
+      "/get_video?path=" + encodeURIComponent(videoPath) + "&token=" + token;
     var normalized = fullPath.replace(/\\/g, "/");
 
     catedralLog("URL construída: host=" + host + "; port=" + port + "; rota=/get_video. Token omitido.");
     h.setGlobal(CATEDRAL_VIDEO_PREVIEW_KEY, {
       available: true,
       url: url,
-      path: fullPath,
+      path: videoPath,
       name: normalized.substring(normalized.lastIndexOf("/") + 1),
       updated_at: new Date().getTime()
     });
