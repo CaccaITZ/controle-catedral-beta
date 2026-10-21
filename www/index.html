@@ -474,7 +474,6 @@
         const DEFAULT_HOLYRICS_IP = "192.168.10.178";
         const HOLYRICS_IP_KEY = "catedralHolyricsServerIp";
         const HOLYRICS_API_PORT = 4455;
-        const CATEDRAL_PREVIEW_API_PORT = 4545;
         const TOKEN = "A9DDQuW0b3CZhc5p";
 
         function getHolyricsIp() {
@@ -591,18 +590,6 @@
         /* ── API ── */
         async function api(action, body = {}) {
             const r = await fetch(getHolyricsApiBase() + '/api/' + action + '?token=' + encodeURIComponent(TOKEN), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            });
-            return r.json();
-        }
-
-        // A ação personalizada de prévia foi configurada no API Server da porta 4545.
-        // Mantém os comandos normais do Holyrics na porta original 4455.
-        async function apiPreviaVideo(action, body = {}) {
-            const base = 'http://' + getHolyricsIp() + ':' + CATEDRAL_PREVIEW_API_PORT;
-            const r = await fetch(base + '/api/' + action + '?token=' + encodeURIComponent(TOKEN), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body)
@@ -749,7 +736,7 @@
 
             videoPreviewRequestInFlight = true;
             try {
-                const response = await apiPreviaVideo('GetCatedralVideoPreview');
+                const response = await api('GetCatedralVideoPreview');
                 if (!response || response.status !== 'ok' || !response.data) {
                     throw new Error('A API não retornou dados válidos de GetCatedralVideoPreview.');
                 }
