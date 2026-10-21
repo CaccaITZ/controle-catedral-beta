@@ -516,6 +516,8 @@
         let videoPreviewErrorPath = '';
         let videoTokenPromptDismissedPath = '';
         let latestMediaPlayerInfo = null;
+        // undefined = ainda não consultado; null = nenhuma apresentação ativa; objeto = PPT/letra/imagem/texto etc.
+        let latestCurrentPresentation;
         let lastReceivedPreviewSignature = '';
         let catedralPreviewEndpointWarned = false;
         let videoPreviewErrorUrl = '';
@@ -624,8 +626,17 @@
             return url.toString();
         }
 
+        function holyricsTemApresentacaoAtiva() {
+            return latestCurrentPresentation !== undefined
+                && latestCurrentPresentation !== null
+                && typeof latestCurrentPresentation === 'object';
+        }
+
         function mostrarVideoAtual() {
-            if (modoTexto) return;
+            // A URL do VLC pode continuar disponível mesmo depois que o Holyrics
+            // passou a exibir letra, imagem, texto ou apresentação. Nesse caso,
+            // a tela de retorno do Holyrics tem prioridade sobre a prévia direta.
+            if (modoTexto || holyricsTemApresentacaoAtiva()) return;
             videoPreviewActive = true;
             document.getElementById('atualContainer').classList.add('hidden');
             document.getElementById('videoAtual').classList.remove('hidden');
@@ -689,6 +700,15 @@
             videoPreviewPath = String(payload.path || payload.name || videoPreviewPath || '');
             const video = document.getElementById('videoAtual');
 
+            // Não deixar um vídeo que permaneceu na lista do VLC cobrir outro
+            // conteúdo que o Holyrics esteja exibindo neste momento.
+            if (holyricsTemApresentacaoAtiva()) {
+                if (videoPreviewActive || !video.classList.contains('hidden')) {
+                    restaurarAtualHolyrics();
+                }
+                return;
+            }
+
             if (videoPreviewErrorUrl === streamUrl) return;
 
             if (streamUrl !== videoPreviewUrl) {
@@ -740,6 +760,22 @@
                 if (!response || response.status !== 'ok' || !response.data) {
                     throw new Error('A API não retornou dados válidos de GetCatedralVideoPreview.');
                 }
+
+                // Consultar também o conteúdo apresentado pelo Holyrics. GetMediaPlayerInfo
+                // sozinho não basta: o VLC pode continuar com um vídeo ativo enquanto o
+                // Holyrics passa a exibir PPT, imagem, letra ou texto.
+                try {
+                    const presentation = await api('GetCurrentPresentation');
+                    if (presentation && presentation.status === 'ok') {
+                        latestCurrentPresentation = presentation.data == null ? null : presentation.data;
+                        if (holyricsTemApresentacaoAtiva() && videoPreviewActive) {
+                            restaurarAtualHolyrics();
+                        }
+                    }
+                } catch (_) {
+                    // Preserva o último estado conhecido se a consulta falhar temporariamente.
+                }
+
                 // O API Server do Holyrics pode encapsular o resultado em vários níveis:
                 // { status:"ok", data:{ status:"ok", data:{ available:true, url:"..." } } }.
                 // Desembrulha a resposta até alcançar o objeto que contém available/url,
@@ -768,6 +804,12 @@
                     include_slides: true,
                     include_slide_preview: true
                 });
+                if (j && j.status === 'ok') {
+                    latestCurrentPresentation = j.data == null ? null : j.data;
+                    if (holyricsTemApresentacaoAtiva() && videoPreviewActive) {
+                        restaurarAtualHolyrics();
+                    }
+                }
                 if (j.status === 'ok' && j.data) {
                     const atual = Number(j.data.slide_number);
                     // Só recarrega o iframe quando o slide MUDA (evita reiniciar o vídeo a cada 2s)
