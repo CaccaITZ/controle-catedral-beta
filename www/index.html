@@ -796,7 +796,10 @@
                 (payload && (payload.path || payload.name)) || streamUrl || ''
             );
             const playing = !!(payload && payload.playing === true);
-            const tempo = Number(payload && payload.time_ms);
+            const tempoBruto = Number(payload && payload.time_ms);
+            // O Holyrics pode retornar time_ms=-1 quando o player é parado.
+            // Esse valor não representa o reinício do vídeo e não pode reativar sua tela.
+            const tempo = Number.isFinite(tempoBruto) && tempoBruto >= 0 ? tempoBruto : null;
             let novaSolicitacao = false;
 
             if (!ultimaIdentidadeVideo) {
@@ -806,20 +809,22 @@
                     novaSolicitacao = true;
                 }
             } else {
-                if (identidade && identidade !== ultimaIdentidadeVideo) {
+                if (playing && identidade && identidade !== ultimaIdentidadeVideo) {
                     novaSolicitacao = true;
                 } else if (ultimoPlayingVideo === false && playing) {
                     novaSolicitacao = true;
-                } else if (Number.isFinite(tempo) && Number.isFinite(ultimoTempoVideoMs)
+                } else if (playing && ultimoPlayingVideo === true
+                    && tempo !== null && Number.isFinite(ultimoTempoVideoMs)
                     && tempo < ultimoTempoVideoMs - 2500) {
-                    // O mesmo arquivo reiniciado desde o começo também conta como nova solicitação.
+                    // Só considerar reinício de tempo quando o vídeo realmente está tocando.
                     novaSolicitacao = true;
                 }
             }
 
             ultimaIdentidadeVideo = identidade;
             ultimoPlayingVideo = playing;
-            if (Number.isFinite(tempo)) ultimoTempoVideoMs = tempo;
+            // Preserva o último tempo válido durante o estado parado; ignora -1.
+            if (tempo !== null) ultimoTempoVideoMs = tempo;
 
             if (novaSolicitacao) {
                 videoRequestJustDetectedThisPoll = true;
