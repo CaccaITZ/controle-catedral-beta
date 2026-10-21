@@ -740,7 +740,18 @@
                 if (!response || response.status !== 'ok' || !response.data) {
                     throw new Error('A API não retornou dados válidos de GetCatedralVideoPreview.');
                 }
-                receberUrlVideoApi(response.data);
+                // O API Server do Holyrics pode encapsular o resultado em vários níveis:
+                // { status:"ok", data:{ status:"ok", data:{ available:true, url:"..." } } }.
+                // Desembrulha a resposta até alcançar o objeto que contém available/url,
+                // como já é feito no HTML de diagnóstico que reproduz o vídeo corretamente.
+                let previewData = response;
+                for (let i = 0; i < 5 && previewData && typeof previewData === 'object'
+                    && !Object.prototype.hasOwnProperty.call(previewData, 'available')
+                    && previewData.data && typeof previewData.data === 'object'; i++) {
+                    previewData = previewData.data;
+                }
+
+                receberUrlVideoApi(previewData);
             } catch (error) {
                 console.warn('Prévia Catedral: falha ao consultar GetCatedralVideoPreview:', error);
             } finally {
