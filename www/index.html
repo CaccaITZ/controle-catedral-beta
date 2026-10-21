@@ -526,6 +526,8 @@
         let ultimaIdentidadeVideo = '';
         let ultimoPlayingVideo = null;
         let ultimoTempoVideoMs = null;
+        let videoRequestJustDetectedThisPoll = false;
+        let mediaStopInFlight = false;
         let catedralPreviewEndpointWarned = false;
         let videoPreviewErrorUrl = '';
 
@@ -650,28 +652,106 @@
             ].join('|');
         }
 
-        function registrarApresentacaoHolyrics(presentation) {
+        function limparSlideProximo() {
+            const next = document.getElementById('nextSlide');
+            if (next) next.removeAttribute('src');
+            const textoProximo = document.getElementById('textoProximo');
+            if (textoProximo) textoProximo.src = 'about:blank';
+            lastSlideNumber = null;
+        }
+
+        function recarregarTelaRetorno() {
+            const atual = document.getElementById('atualContainer');
+            if (atual) {
+                atual.src = 'http://' + getHolyricsIp() + '/stage-view/widescreen?_=' + Date.now();
+            }
+        }
+
+        function arquivoPareceVideo(media) {
+            const nome = String((media && (media.path || media.name)) || '')
+                .split(/[?#]/)[0].toLowerCase();
+            return /\\.(mp4|m4v|mov|webm|mkv|avi|mpeg|mpg|wmv|flv|3gp|ogv)$/i.test(nome);
+        }
+
+        async function pararVideoHolyricsSeNecessario() {
+            const media = latestMediaPlayerInfo;
+            if (mediaStopInFlight || !media || media.playing !== true || !arquivoPareceVideo(media)) {
+                return false;
+            }
+
+            mediaStopInFlight = true;
+            try {
+                // O vídeo antigo deixa de ser a solicitação atual. Parar o VLC remove
+                // a faixa "Player + tempo" que pode cobrir a apresentação no stage-view.
+                await api('MediaPlayerAction', { action: 'stop' });
+                console.log('Prévia Catedral: vídeo interrompido porque outro conteúdo foi solicitado.');
+                return true;
+            } catch (error) {
+                console.warn('Prévia Catedral: não foi possível interromper o vídeo anterior:', error);
+                return false;
+            } finally {
+                mediaStopInFlight = false;
+            }
+        }
+
+        async function reapresentarSlideAtual(presentation) {
+            const slideNumber = Number(presentation && presentation.slide_number);
+            if (!Number.isFinite(slideNumber) || slideNumber < 1) return;
+            try {
+                // Ao parar o VLC, algumas telas mantêm o último quadro até o slide
+                // ser reativado. Reaplicar o índice atual evita exigir novo toque no slide.
+                await api('ActionGoToIndex', { index: slideNumber - 1 });
+            } catch (error) {
+                console.warn('Prévia Catedral: não foi possível reativar o slide atual:', error);
+            }
+        }
+
+        async function registrarApresentacaoHolyrics(presentation, videoRequestJustDetected = false) {
             latestCurrentPresentation = presentation && typeof presentation === 'object'
                 ? presentation : null;
             const assinatura = assinaturaApresentacao(latestCurrentPresentation);
 
             if (ultimaAssinaturaApresentacao === undefined) {
                 ultimaAssinaturaApresentacao = assinatura;
-                // Na inicialização, uma apresentação existente é o conteúdo visível conhecido.
+                // Na inicialização, respeita o vídeo recém-iniciado; caso contrário,
+                // a apresentação que já estava ativa é a fonte visível conhecida.
                 if (assinatura && !fonteAtualSolicitada) fonteAtualSolicitada = 'holyrics';
+                if (!assinatura) limparSlideProximo();
                 return;
             }
 
             if (assinatura === ultimaAssinaturaApresentacao) return;
             const assinaturaAnterior = ultimaAssinaturaApresentacao;
+            const fonteAnterior = fonteAtualSolicitada;
             ultimaAssinaturaApresentacao = assinatura;
 
-            // Toda mudança de apresentação/tela substitui a fonte anterior.
-            // Se a apresentação foi encerrada, não reativa um vídeo antigo sozinho.
+            // Um início/reinício de vídeo detectado nesta mesma consulta é a solicitação
+            // mais recente; não pare esse vídeo porque o Holyrics deixou de reportar slides.
+            if (videoRequestJustDetected) {
+                if (!assinatura) limparSlideProximo();
+                console.log('Nova solicitação de vídeo prevalece sobre a mudança de apresentação.');
+                return;
+            }
+
+            // Outra apresentação/letra, ou ESC para encerrar tudo, substitui o vídeo atual.
             fonteAtualSolicitada = 'holyrics';
             restaurarAtualHolyrics();
+            if (!assinatura) limparSlideProximo();
+
+            const videoAnteriorAtivo = fonteAnterior === 'video'
+                || (latestMediaPlayerInfo && latestMediaPlayerInfo.playing === true
+                    && arquivoPareceVideo(latestMediaPlayerInfo));
+
             console.log('Conteúdo mais recente do Holyrics:', assinatura || '(sem apresentação)',
                 '| anterior:', assinaturaAnterior || '(sem apresentação)');
+
+            if (videoAnteriorAtivo) {
+                await pararVideoHolyricsSeNecessario();
+                if (assinatura) await reapresentarSlideAtual(latestCurrentPresentation);
+            }
+
+            // Recarrega após parar o VLC/reativar o slide, removendo quadro e faixa antigos.
+            recarregarTelaRetorno();
         }
 
         function registrarSolicitacaoDeVideo(payload, streamUrl) {
@@ -705,6 +785,7 @@
             if (Number.isFinite(tempo)) ultimoTempoVideoMs = tempo;
 
             if (novaSolicitacao) {
+                videoRequestJustDetectedThisPoll = true;
                 fonteAtualSolicitada = 'video';
                 console.log('Conteúdo mais recente: vídeo', identidade);
             } else if (!fonteAtualSolicitada && !holyricsTemApresentacaoAtiva() && playing) {
@@ -844,22 +925,9 @@
                     throw new Error('A API não retornou dados válidos de GetCatedralVideoPreview.');
                 }
 
-                // Consultar também o conteúdo apresentado pelo Holyrics. GetMediaPlayerInfo
-                // sozinho não basta: o VLC pode continuar com um vídeo ativo enquanto o
-                // Holyrics passa a exibir PPT, imagem, letra ou texto.
-                try {
-                    const presentation = await api('GetCurrentPresentation');
-                    if (presentation && presentation.status === 'ok') {
-                        registrarApresentacaoHolyrics(presentation.data);
-                    }
-                } catch (_) {
-                    // Preserva o último estado conhecido se a consulta falhar temporariamente.
-                }
-
                 // O API Server do Holyrics pode encapsular o resultado em vários níveis:
                 // { status:"ok", data:{ status:"ok", data:{ available:true, url:"..." } } }.
-                // Desembrulha a resposta até alcançar o objeto que contém available/url,
-                // como já é feito no HTML de diagnóstico que reproduz o vídeo corretamente.
+                // Desembrulha a resposta até alcançar o objeto que contém available/url.
                 let previewData = response;
                 for (let i = 0; i < 5 && previewData && typeof previewData === 'object'
                     && !Object.prototype.hasOwnProperty.call(previewData, 'available')
@@ -867,7 +935,22 @@
                     previewData = previewData.data;
                 }
 
+                // Processa a informação do VLC primeiro, para saber se acabou de ser
+                // solicitada uma reprodução nova antes de interpretar a mudança da apresentação.
+                videoRequestJustDetectedThisPoll = false;
                 receberUrlVideoApi(previewData);
+
+                try {
+                    const presentation = await api('GetCurrentPresentation');
+                    if (presentation && presentation.status === 'ok') {
+                        await registrarApresentacaoHolyrics(
+                            presentation.data,
+                            videoRequestJustDetectedThisPoll
+                        );
+                    }
+                } catch (_) {
+                    // Preserva o último estado conhecido se a consulta falhar temporariamente.
+                }
             } catch (error) {
                 console.warn('Prévia Catedral: falha ao consultar GetCatedralVideoPreview:', error);
             } finally {
@@ -884,9 +967,6 @@
                     include_slides: true,
                     include_slide_preview: true
                 });
-                if (j && j.status === 'ok') {
-                    registrarApresentacaoHolyrics(j.data);
-                }
                 if (j.status === 'ok' && j.data) {
                     const atual = Number(j.data.slide_number);
                     // Só recarrega o iframe quando o slide MUDA (evita reiniciar o vídeo a cada 2s)
@@ -897,6 +977,11 @@
                     if (j.data.slides && j.data.slides[atual]) {
                         document.getElementById('nextSlide').src =
                             'data:image/jpeg;base64,' + j.data.slides[atual].preview;
+                    }
+                } else if (j && j.status === 'ok' && j.data == null) {
+                    // ESC/fechamento: não manter o slide anterior no painel "Próximo".
+                    if (lastSlideNumber !== null || document.getElementById('nextSlide').getAttribute('src')) {
+                        limparSlideProximo();
                     }
                 }
             } catch(e) { /* silencioso */ }
