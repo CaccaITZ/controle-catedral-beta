@@ -478,6 +478,11 @@
 
         function getHolyricsIp() {
             const saved = (localStorage.getItem(HOLYRICS_IP_KEY) || '').trim();
+            // Corrige o IP antigo incorreto salvo localmente durante os testes.
+            if (saved === '192.168.10.10') {
+                localStorage.setItem(HOLYRICS_IP_KEY, DEFAULT_HOLYRICS_IP);
+                return DEFAULT_HOLYRICS_IP;
+            }
             return saved || DEFAULT_HOLYRICS_IP;
         }
 
