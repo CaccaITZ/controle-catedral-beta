@@ -59,14 +59,20 @@ function readPluginVideoSettings() {
   return null;
 }
 
+function safeVideoObject(obj) {
+  try { return JSON.stringify(obj == null ? null : obj); }
+  catch (e) { return "[objeto não serializável]"; }
+}
+
 function publishCatedralVideoPreview(obj, module) {
-  catedralLog("Evento de vídeo recebido; verificando file_fullname.");
-  var fullPath = String(obj && obj.file_fullname || "").trim();
+  catedralLog("Evento de vídeo recebido. Dados: " + safeVideoObject(obj));
+  var fullPath = String(obj && (obj.file_fullname || obj.file || obj.path || obj.filename) || "").trim();
   if (!fullPath) {
-    catedralLog("O evento não trouxe file_fullname; não é possível construir a URL.");
+    catedralLog("O evento não trouxe caminho de arquivo conhecido. Chaves recebidas: " + safeVideoObject(obj));
     h.setGlobal(CATEDRAL_VIDEO_PREVIEW_KEY, {
       available: false,
-      message: "O Holyrics não forneceu o caminho completo do vídeo.",
+      message: "O gatilho de vídeo foi acionado, mas não trouxe file_fullname/file/path/filename. Consulte o log do módulo.",
+      event: obj || null,
       updated_at: new Date().getTime()
     });
     return;
@@ -120,9 +126,15 @@ function publishCatedralVideoPreview(obj, module) {
 function startup(module) {
   catedralLog("Módulo iniciado. Host configurado no módulo: " +
     String(module && module.settings && module.settings.video_url_host || "(vazio; usa configuração do plugin)"));
+  var previous = null;
+  try { previous = h.getGlobal(CATEDRAL_VIDEO_PREVIEW_KEY, null); } catch (e) {}
+  if (previous && previous.available === true) {
+    catedralLog("Mantendo a última prévia válida ao iniciar/recarregar o módulo.");
+    return;
+  }
   h.setGlobal(CATEDRAL_VIDEO_PREVIEW_KEY, {
     available: false,
-    message: "Aguardando o próximo vídeo exibido pelo Holyrics.",
+    message: "Módulo iniciado; aguardando evento displaying/any_video.",
     updated_at: new Date().getTime()
   });
 }
@@ -133,7 +145,7 @@ function triggers(module) {
     when: "displaying",
     item: "any_video",
     action: function (obj) {
-      catedralLog("Trigger displaying/any_video acionado.");
+      catedralLog("TRIGGER CONFIRMADO: displaying/any_video.");
       publishCatedralVideoPreview(obj, module);
     }
   }];
