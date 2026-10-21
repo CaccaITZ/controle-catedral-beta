@@ -601,6 +601,7 @@
         let previewFrameData = '';
         let lastPlayerCheck = 0;
         let playerCheckInFlight = false;
+        let holyricsVideoActive = false;
 
         function mostrarVideoAtual() {
             if (modoTexto) return;
@@ -625,6 +626,7 @@
             lastReceivedPreviewSignature = '';
             previewFrameId = '';
             previewFrameData = '';
+            holyricsVideoActive = false;
         }
 
         async function obterQuadroPreviaHolyrics() {
@@ -676,6 +678,7 @@
                                 (info.playing === true ||
                                  (Number.isFinite(duration) && duration > 0 &&
                                   Number.isFinite(elapsed) && elapsed >= 0 && elapsed < duration));
+                            holyricsVideoActive = active;
                             if (!active) {
                                 if (videoPreviewActive) limparPreviaRecebida();
                                 return;
@@ -687,8 +690,7 @@
                     }
                 }
 
-                if (latestMediaPlayerInfo && pareceVideo(latestMediaPlayerInfo) &&
-                    (latestMediaPlayerInfo.playing === true || videoPreviewActive)) {
+                if (holyricsVideoActive) {
                     nextDelay = await obterQuadroPreviaHolyrics();
                 }
             } catch (error) {
